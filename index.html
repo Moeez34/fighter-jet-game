@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>STAR LANCER — Retro Space Shooter</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main class="stage" id="stage" data-state="title" aria-label="Star Lancer arcade game">
+  <canvas id="game" width="480" height="720"></canvas>
+
+  <!-- In-game HUD -->
+  <div class="hud" id="hud">
+    <div class="hud__cell">
+      <span class="hud__label hud__label--1up">1UP</span>
+      <span class="hud__value" id="score">000000</span>
+    </div>
+    <div class="hud__cell hud__cell--center">
+      <span class="hud__label">HI-SCORE</span>
+      <span class="hud__value hud__value--hi" id="high">000000</span>
+    </div>
+    <div class="hud__cell hud__cell--right">
+      <span class="hud__label">LEVEL</span>
+      <span class="hud__value" id="level">01</span>
+    </div>
+  </div>
+
+  <div class="lives" id="lives" aria-hidden="true"></div>
+
+  <div class="power" id="power" aria-hidden="true">
+    <span class="power__label">DOUBLE</span>
+    <span class="power__bar"><span class="power__fill" id="power-fill"></span></span>
+  </div>
+
+  <div class="hints" aria-hidden="true">
+    <span><b>P</b> PAUSE &nbsp;/&nbsp; <b>M</b> <span id="sound-state">SOUND ON</span></span>
+  </div>
+
+  <!-- Menu / pause / game-over overlays -->
+  <div class="overlay">
+    <section class="screen screen--title active" id="screen-title">
+      <p class="eyebrow">SECTOR 7 // DEEP SPACE</p>
+      <h1 class="logo"><span>STAR</span><span class="logo__accent">LANCER</span></h1>
+      <p class="tagline">INTERCEPTOR VS. SWARM</p>
+      <div class="hi-badge">HIGH SCORE <strong id="title-high">000000</strong></div>
+      <p class="prompt blink">PRESS ENTER TO START</p>
+      <p class="credit">(C) 1985 STAR LANCER / 1 CREDIT</p>
+      <div class="controls">
+        <p class="keyboard-only"><span>MOVE</span> ARROWS / WASD</p>
+        <p class="keyboard-only"><span>FIRE</span> SPACE - HOLD</p>
+        <p class="touch-only"><span>TOUCH</span> DRAG TO MOVE / AUTO-FIRE</p>
+      </div>
+    </section>
+
+    <section class="screen screen--dim" id="screen-pause">
+      <p class="screen-title">PAUSED</p>
+      <p class="prompt blink">PRESS P TO RESUME</p>
+      <p class="mini-note">TAP TO RESUME</p>
+    </section>
+
+    <section class="screen screen--dim" id="screen-over">
+      <p class="screen-title screen-title--pink">GAME OVER</p>
+      <p class="final-label">FINAL SCORE</p>
+      <p class="final-score" id="final-score">000000</p>
+      <p class="new-high hidden" id="new-high">* NEW HIGH SCORE *</p>
+      <p class="prompt blink">PRESS ENTER TO RESTART</p>
+      <p class="mini-note">OR TAP TO PLAY AGAIN</p>
+    </section>
+  </div>
+
+  <div class="banner" id="banner" aria-live="polite"></div>
+  <div class="crt" aria-hidden="true"></div>
+</main>
+
+<script src="game.js"></script>
+</body>
+</html>
