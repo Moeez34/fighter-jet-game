@@ -18,8 +18,12 @@
    ========================================================================== */
 
 const CONFIG = {
-  width: 480,
+  // The playfield uses a fixed logical height so the world always fills the
+  // viewport vertically; width is derived from the viewport aspect ratio at
+  // boot and on resize (see Game.applyViewport).
   height: 720,
+  width: 480,             // provisional — replaced by the real viewport width
+  designWidth: 480,       // reference width for star density and spawn pacing
   step: 1 / 60,           // fixed 60 Hz simulation (arcade-authentic + cheaper)
   maxFrame: 0.25,         // clamp huge tab-switch deltas
 
@@ -527,7 +531,10 @@ class Starfield {
     const g = canvas.getContext('2d');
     g.imageSmoothingEnabled = false;
 
-    for (let i = 0; i < cfg.count; i++) {
+    // Keep star density constant as the playfield gets wider.
+    const count = Math.max(6, Math.round(cfg.count * CONFIG.width / CONFIG.designWidth));
+
+    for (let i = 0; i < count; i++) {
       const x = Math.round(rand(0, CONFIG.width - cfg.size));
       const y = Math.round(rand(0, CONFIG.height - cfg.size));
       g.globalAlpha = cfg.alpha * rand(0.5, 1);
@@ -542,6 +549,14 @@ class Starfield {
       }
     }
     return canvas;
+  }
+
+  /** Re-bake tiles after the playfield width changes, keeping scroll state. */
+  rebuild() {
+    for (const layer of this.layers) {
+      layer.tile = this.buildTile(layer.cfg);
+      layer.offset %= CONFIG.height;
+    }
   }
 
   update(dt) {
@@ -620,7 +635,10 @@ class Player {
       if (input.down) dy += 1;
       if (dx || dy) {
         const len = Math.hypot(dx, dy) || 1;
-        this.x += (dx / len) * cfg.speed * dt;
+        // Wider playfields need a little more horizontal speed to stay nimble;
+        // vertical speed is unchanged because the world height never changes.
+        const hScale = clamp(Math.sqrt(CONFIG.width / CONFIG.height), 1, 1.4);
+        this.x += (dx / len) * cfg.speed * hScale * dt;
         this.y += (dy / len) * cfg.speed * dt;
       }
     }
@@ -1001,6 +1019,9 @@ class Game {
       },
     };
 
+    // Measure the viewport before building anything that depends on world width.
+    this.applyViewport();
+
     this.sprites = buildSpriteCache();
     this.glows = {
       blue: buildGlow('rgba(73, 166, 255, 0.55)', 96),
@@ -1073,6 +1094,68 @@ class Game {
     catch (err) { /* storage unavailable — ignore */ }
   }
 
+  /* ---------- viewport / responsive playfield ---------- */
+
+  /**
+   * Fit the logical playfield to the viewport. Height stays fixed so the world
+   * always fills the screen vertically, while width follows the real aspect
+   * ratio — no letterboxing, no stretched sprites.
+   */
+  applyViewport() {
+    const vw = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    const vh = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+
+    const width = Math.max(1, Math.round(CONFIG.height * (vw / vh)));
+    const changed = width !== CONFIG.width
+      || this.canvas.width !== width
+      || this.canvas.height !== CONFIG.height;
+
+    CONFIG.width = width;
+    if (changed) {
+      this.canvas.width = width;
+      this.canvas.height = CONFIG.height;
+      this.ctx.imageSmoothingEnabled = false;
+    }
+
+    CONFIG.player.startX = width / 2;
+    return changed;
+  }
+
+  /** Rebuild width-dependent caches and keep entities inside the new world. */
+  handleResize() {
+    const oldWidth = CONFIG.width;
+    if (!this.applyViewport() || oldWidth === CONFIG.width) return;
+
+    const ratio = CONFIG.width / oldWidth;
+
+    this.background = this.buildBackground();
+    this.starfield.rebuild();
+
+    const halfW = this.player.w / 2;
+    this.player.x = clamp(this.player.x * ratio, halfW, CONFIG.width - halfW);
+
+    this.input.pointerTarget.x = clamp(
+      this.input.pointerTarget.x * ratio,
+      halfW,
+      CONFIG.width - halfW
+    );
+    this.input.pointerTarget.y = this.player.y;
+
+    for (const enemy of this.enemies) {
+      const ew = enemy.w / 2;
+      enemy.baseX = clamp(enemy.baseX * ratio, ew, CONFIG.width - ew);
+      enemy.x = clamp(enemy.x * ratio, ew, CONFIG.width - ew);
+    }
+
+    for (const powerup of this.powerups) {
+      const pw = powerup.w / 2 + 10;
+      powerup.baseX = clamp(powerup.baseX * ratio, pw, CONFIG.width - pw);
+      powerup.x = clamp(powerup.x * ratio, pw, CONFIG.width - pw);
+    }
+
+    this.render();
+  }
+
   /* ---------- background (rendered once) ---------- */
 
   buildBackground() {
@@ -1088,8 +1171,12 @@ class Game {
     g.fillStyle = base;
     g.fillRect(0, 0, c.width, c.height);
 
-    // Barely-there nebula haze keeps the void from feeling flat.
-    const nebulaA = g.createRadialGradient(90, 150, 0, 90, 150, 250);
+    // Barely-there nebula haze keeps the void from feeling flat. Positions and
+    // radii are proportional so the haze spreads across wide playfields.
+    const ax = CONFIG.width * 0.1875;
+    const ay = CONFIG.height * 0.208;
+    const radiusA = CONFIG.height * 0.35;
+    const nebulaA = g.createRadialGradient(ax, ay, 0, ax, ay, radiusA);
     nebulaA.addColorStop(0, 'rgba(30, 78, 130, 0.11)');
     nebulaA.addColorStop(0.55, 'rgba(24, 46, 96, 0.04)');
     nebulaA.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -1097,7 +1184,10 @@ class Game {
     g.fillRect(0, 0, c.width, c.height);
 
     // A whisper of violet in the lower corner.
-    const nebulaB = g.createRadialGradient(430, 560, 0, 430, 560, 270);
+    const bx = CONFIG.width * 0.896;
+    const by = CONFIG.height * 0.778;
+    const radiusB = CONFIG.height * 0.375;
+    const nebulaB = g.createRadialGradient(bx, by, 0, bx, by, radiusB);
     nebulaB.addColorStop(0, 'rgba(72, 20, 82, 0.09)');
     nebulaB.addColorStop(0.6, 'rgba(44, 14, 62, 0.035)');
     nebulaB.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -1295,7 +1385,9 @@ class Game {
       s.minInterval,
       s.baseInterval * Math.pow(s.intervalDecay, this.level - 1)
     );
-    return base * rand(s.jitterMin, s.jitterMax);
+    // Keep the same screen pressure when the field is wider than the original.
+    const density = clamp(Math.sqrt(CONFIG.width / CONFIG.designWidth), 1, 1.35);
+    return (base * rand(s.jitterMin, s.jitterMax)) / density;
   }
 
   spawnEnemy() {
@@ -1611,6 +1703,16 @@ class Game {
     window.addEventListener('blur', () => this.onBlur());
     window.addEventListener('beforeunload', () => this.saveHighScore());
     document.addEventListener('visibilitychange', () => this.onVisibility());
+
+    // Debounce resize so dragging a window edge doesn't rebuild star tiles
+    // dozens of times per second.
+    let resizeTimer = 0;
+    const queueResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => this.handleResize(), 90);
+    };
+    window.addEventListener('resize', queueResize);
+    window.addEventListener('orientationchange', queueResize);
 
     const stage = this.dom.stage;
     stage.addEventListener('pointerdown', (e) => this.onPointerDown(e));

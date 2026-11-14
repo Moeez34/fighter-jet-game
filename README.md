@@ -18,10 +18,11 @@ Open `index.html` in a modern browser.
 
 ## Features
 
-- 480 × 720 portrait canvas with pixel-art sprites and nearest-neighbor rendering
+- Full-viewport canvas: fixed 720px logical height with width derived from the screen aspect ratio, so the game fills the whole display without letterboxing or stretching
 - Three-layer parallax starfield and CRT scanline overlay
 - Three enemy types, power-ups, particle explosions, and persistent high score
 - Fixed 60 Hz simulation, cached sprite bloom, pooled bullets/enemies, and pre-rendered star tiles
+- UI scaling that follows the 480px design width while respecting safe-area insets
 - Offline embedded arcade pixel font
 - Web Audio chiptune sound effects after the first input
 
