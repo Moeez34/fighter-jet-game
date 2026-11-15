@@ -153,15 +153,6 @@ canvas#game:focus { outline: none; }
 
 .hud__value--hi { color: var(--amber); text-shadow: 0 0 2px #fff, 0 0 9px rgba(255, 200, 87, 0.6); }
 
-.hud__music {
-  font-size: 1.35rem;
-  line-height: 1;
-  letter-spacing: 0.08em;
-  color: var(--mint);
-  opacity: 0.82;
-  text-shadow: 0 0 7px rgba(87, 255, 194, 0.45);
-}
-
 .lives {
   position: absolute;
   left: max(3.4rem, env(safe-area-inset-left));
@@ -401,14 +392,6 @@ canvas#game:focus { outline: none; }
   text-shadow: 0 0 8px rgba(93, 243, 255, 0.16);
 }
 
-.music-note {
-  margin: 2.6rem 0 0;
-  font-size: 1.25rem;
-  letter-spacing: 0.12em;
-  color: var(--amber);
-  text-shadow: 0 0 8px rgba(255, 200, 87, 0.55);
-}
-
 .blink { animation: blink 1.15s steps(1, end) infinite; }
 
 @keyframes blink {
@@ -624,64 +607,6 @@ canvas#game:focus { outline: none; }
   letter-spacing: 0.06em;
   color: var(--text);
   text-shadow: 0 0 2px #fff, 0 0 12px rgba(93, 243, 255, 0.85);
-}
-
-.loader__warning {
-  max-width: 60rem;
-  margin: 3.4rem 0 0;
-  font-size: 1.35rem;
-  line-height: 1.9;
-  letter-spacing: 0.1em;
-  color: var(--amber);
-  text-shadow: 0 0 8px rgba(255, 200, 87, 0.55);
-}
-
-/* ---------- NOW PLAYING (official YouTube embed) ---------- */
-
-.now-playing {
-  position: absolute;
-  right: max(2.4rem, env(safe-area-inset-right));
-  bottom: max(2.4rem, env(safe-area-inset-bottom));
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-  min-width: 200px;
-  min-height: 200px;
-  padding: 0.9rem;
-  background: #000;
-  border: 1px solid rgba(93, 243, 255, 0.55);
-  border-radius: 2px;
-  box-shadow:
-    0 0 16px rgba(93, 243, 255, 0.28),
-    inset 0 0 14px rgba(93, 243, 255, 0.12);
-  pointer-events: none;
-}
-
-.now-playing.is-hidden { display: none; }
-
-.now-playing__label {
-  font-size: 1.25rem;
-  letter-spacing: 0.16em;
-  color: var(--cyan);
-  text-shadow: 0 0 8px rgba(93, 243, 255, 0.75);
-}
-
-.now-playing__screen {
-  box-sizing: content-box;
-  width: 200px;
-  height: 200px;
-  overflow: hidden;
-  background: #000;
-  border: 1px solid rgba(93, 243, 255, 0.25);
-}
-
-#yt-player,
-#yt-player iframe {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-  border: 0;
 }
 
 /* ---------- CRT overlay (scanlines + vignette) ---------- */
