@@ -10,7 +10,9 @@
      5. STARFIELD     — three parallax star layers
      6. ENTITIES      — Player, Bullet, Enemy, Particle, PowerUp
      7. GAME          — state machine, spawning, collisions, rendering
-     8. INPUT + BOOT  — keyboard / pointer handling and startup
+     8. MUSIC         — entrance track, official YouTube embed, MP3 fallback
+     9. LOADER        — retro boot screen / progress UI
+    10. INPUT + BOOT  — keyboard / pointer handling and startup
    ========================================================================== */
 
 /* ==========================================================================
@@ -125,6 +127,24 @@ const CONFIG = {
     playerGlow: '#49a6ff',
     warm: '#ffd166',
     white: '#ffffff',
+  },
+
+  // Background music. Change START / END to pick a different 14-second slice
+  // of the video; both are in seconds.
+  MUSIC: {
+    VIDEO_ID: 'jlLxowybfV8',
+    START: 0,
+    END: 14,
+    VOLUME_TITLE: 70,
+    VOLUME_PLAY: 35,
+  },
+
+  // Entrance track played on the boot loader. The loader will not reach
+  // READY until this 37-second piece (and the YouTube milestones) finish.
+  ENTRANCE: {
+    SRC: 'assets/entrance.mp3',
+    DURATION: 37,
+    VOLUME: 80,
   },
 };
 
@@ -1008,6 +1028,8 @@ class Game {
       power: document.getElementById('power'),
       powerFill: document.getElementById('power-fill'),
       soundState: document.getElementById('sound-state'),
+      musicState: document.getElementById('music-state'),
+      musicNote: document.getElementById('music-note'),
       titleHigh: document.getElementById('title-high'),
       finalScore: document.getElementById('final-score'),
       newHigh: document.getElementById('new-high'),
@@ -1038,7 +1060,7 @@ class Game {
     this.bulletPool = [];
     this.enemyPool = [];
 
-    this.state = 'title';
+    this.state = 'loading';
     this.time = 0;              // animation clock (seconds)
     this.score = 0;
     this.highScore = this.loadHighScore();
@@ -1050,6 +1072,10 @@ class Game {
     this.shake = 0;
     this.flash = 0;
     this.gameOverTimer = 0;
+    this.loopStarted = false;
+    this.inputGuardUntil = 0;
+    this.music = null;
+    this.musicUnavailable = false;
 
     this.input = {
       left: false, right: false, up: false, down: false,
@@ -1060,7 +1086,7 @@ class Game {
     this.pointerId = null;
     this.dragOffset = { x: 0, y: 0 };
 
-    this.hudCache = { score: -1, high: -1, level: -1, lives: -1, power: null, powerPct: null, mute: null };
+    this.hudCache = { score: -1, high: -1, level: -1, lives: -1, power: null, powerPct: null, mute: null, music: null };
 
     this.background = this.buildBackground();
     this.accumulator = 0;
@@ -1070,12 +1096,36 @@ class Game {
     this.bindEvents();
     this.updateHighScoreDisplay();
     this.updateMuteLabel();
-    this.setState('title');
+    this.setState('loading');
     this.updateHUD(true);
     this.updateLivesDisplay(true);
     this.updatePowerHUD();
 
+    // Draw one static frame of the existing starfield behind the boot loader.
+    // The fixed-timestep loop only starts after the user initialises audio.
+    this.renderStatic();
+  }
+
+  /** Leave the loader: show the title screen and start the game loop. */
+  begin(guardUntil = 0) {
+    if (this.loopStarted) return;
+    this.loopStarted = true;
+    this.inputGuardUntil = Math.max(this.inputGuardUntil, guardUntil);
+    this.audio.unlock();
+    this.setState('title');
+    this.updateHUD(true);
+    this.accumulator = 0;
+    this.lastTimestamp = 0;
     requestAnimationFrame(this.frameBound);
+  }
+
+  /** Static backdrop for LOADING / READY (no simulation, no entities). */
+  renderStatic() {
+    const ctx = this.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, CONFIG.width, CONFIG.height);
+    ctx.drawImage(this.background, 0, 0);
+    this.starfield.draw(ctx);
   }
 
   /* ---------- persistence ---------- */
@@ -1220,6 +1270,29 @@ class Game {
       this.updateHighScoreDisplay();
     }
     this.updatePowerHUD();
+    this.updateMusicForState(next);
+  }
+
+  /** Follow the game state with music pausing + volume. */
+  updateMusicForState(next) {
+    if (!this.music) return;
+    if (next === 'playing') {
+      this.music.resume();
+      this.music.fadeTo(CONFIG.MUSIC.VOLUME_PLAY, 500);
+    } else if (next === 'paused') {
+      this.music.pause();
+    } else if (next === 'gameover' || next === 'title') {
+      this.music.fadeTo(CONFIG.MUSIC.VOLUME_TITLE, 500);
+    }
+  }
+
+  /** Show / hide the title-screen music notice when audio cannot play. */
+  setMusicUnavailable(unavailable) {
+    this.musicUnavailable = !!unavailable;
+    this.dom.musicNote.classList.toggle('hidden', !this.musicUnavailable);
+    this.hudCache.mute = null;
+    this.hudCache.music = null;
+    this.updateMuteLabel();
   }
 
   startRun() {
@@ -1332,9 +1405,13 @@ class Game {
   }
 
   updateMuteLabel() {
-    if (this.hudCache.mute === this.audio.muted) return;
-    this.hudCache.mute = this.audio.muted;
-    this.dom.soundState.textContent = this.audio.muted ? 'SOUND OFF' : 'SOUND ON';
+    const muted = this.audio.muted;
+    const musicOn = !muted && !this.musicUnavailable;
+    if (this.hudCache.mute === muted && this.hudCache.music === musicOn) return;
+    this.hudCache.mute = muted;
+    this.hudCache.music = musicOn;
+    this.dom.soundState.textContent = muted ? 'SOUND OFF' : 'SOUND ON';
+    this.dom.musicState.textContent = musicOn ? 'MUSIC: ON' : 'MUSIC: OFF';
   }
 
   showBanner(text) {
@@ -1423,7 +1500,7 @@ class Game {
   /* ---------- update ---------- */
 
   update(dt) {
-    if (this.state === 'paused') return;
+    if (this.state === 'loading' || this.state === 'ready' || this.state === 'paused') return;
 
     this.time += dt;
     this.starfield.update(dt);
@@ -1662,7 +1739,9 @@ class Game {
     for (const power of this.powerups) power.draw(ctx);
     for (const enemy of this.enemies) enemy.draw(ctx);
     for (const bullet of this.bullets) bullet.draw(ctx);
-    if (this.state !== 'title' && this.player.alive) this.player.draw(ctx);
+    if ((this.state === 'playing' || this.state === 'paused') && this.player.alive) {
+      this.player.draw(ctx);
+    }
     this.particles.draw(ctx);
 
     ctx.restore();
@@ -1729,6 +1808,13 @@ class Game {
   }
 
   onKeyDown(e) {
+    // Swallow the key that dismissed the boot loader so it cannot double as
+    // Enter-to-start (or fire a shot) in the same gesture.
+    if (performance.now() < this.inputGuardUntil) {
+      e.preventDefault();
+      return;
+    }
+
     this.audio.unlock();
 
     const action = resolveAction(e);
@@ -1747,7 +1833,8 @@ class Game {
     }
     if (e.code === 'KeyM' || keyName === 'm') {
       e.preventDefault();
-      this.audio.toggleMute();
+      const muted = this.audio.toggleMute();
+      if (this.music) this.music.setMuted(muted);
       this.updateMuteLabel();
       return;
     }
@@ -1781,6 +1868,8 @@ class Game {
   }
 
   onVisibility() {
+    // MusicManager records whether playback was active before the game pauses.
+    if (this.music) this.music.handleVisibility();
     if (!document.hidden) return;
     this.saveHighScore();
     this.clearInput();
@@ -1798,6 +1887,7 @@ class Game {
 
   onPointerDown(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (performance.now() < this.inputGuardUntil) return;
     e.preventDefault();
     this.audio.unlock();
 
@@ -1851,7 +1941,843 @@ class Game {
 }
 
 /* ==========================================================================
-   8. INPUT MAP + BOOT
+   8. MUSIC
+
+   Audio is embedded via the official YouTube player. Copyrighted music:
+   fine for personal use, replace before publishing.
+
+   Progress milestones are real, not a timer:
+     0–20%   IFrame API script ready
+    20–50%   YT.Player constructed
+    50–80%   player onReady
+    80–100%  muted play → PLAYING → pause + seek(START) buffered successfully
+   Any listed player error or the 10s timeout switches to the local MP3
+   fallback, finishes the bar, and lets the game continue.
+   ========================================================================== */
+
+const YT_ERROR_CODES = [2, 5, 100, 101, 150, 153];
+
+class MusicManager {
+  constructor(options = {}) {
+    this.onProgress = options.onProgress || (() => {});
+    this.onWarning = options.onWarning || (() => {});
+    this.onAvailable = options.onAvailable || (() => {});
+    this.onUnavailable = options.onUnavailable || (() => {});
+    this.onEntranceProgress = options.onEntranceProgress || (() => {});
+    this.onEntranceBlocked = options.onEntranceBlocked || (() => {});
+    this.onEntranceComplete = options.onEntranceComplete || (() => {});
+
+    this.mode = 'idle';            // idle | youtube | fallback | silent
+    this.player = null;
+    this.yt = null;
+    this.ytReady = false;
+    this.buffering = false;
+    this.loadComplete = false;
+    this.progress = 0;
+
+    // Entrance track (37s) — real progress based on the audio clock.
+    this.entranceAudio = null;
+    this.entranceMode = 'idle';    // idle | audio | timer | done
+    this.entranceTimer = 0;
+    this.entranceTimerStart = 0;
+    this.entranceDone = false;
+    this.entranceBlocked = false;
+
+    this.fallbackAudio = null;
+    this.fallbackReady = false;
+
+    this.started = false;
+    this.shouldPlay = false;
+    this.playing = false;
+    this.muted = !!options.muted;
+
+    this.volume = CONFIG.MUSIC.VOLUME_TITLE;
+    this.loopTimer = 0;
+    this.loadTimer = 0;
+    this.fadeTimer = 0;
+    this.lifecycleBound = false;
+    this.wasPlayingBeforeHidden = false;
+  }
+
+  /* ---------- loading ---------- */
+
+  init() {
+    if (this.mode !== 'idle') return;
+
+    // Entrance music starts loading immediately; the progress bar waits for it.
+    this.initEntrance();
+
+    if (window.location.protocol === 'file:') {
+      // YouTube embeds report Error 153 on file:// — go straight to fallback.
+      this.onWarning('RUN VIA LOCAL SERVER FOR MUSIC (see README)');
+      this.enterFallback('file-protocol');
+      return;
+    }
+
+    this.mode = 'youtube';
+    this.loadTimer = window.setTimeout(() => {
+      if (!this.loadComplete) this.enterFallback('timeout');
+    }, 10000);
+
+    if (window.YT && typeof window.YT.Player === 'function') {
+      this.onApiReady();
+      return;
+    }
+
+    window.onYouTubeIframeAPIReady = () => this.onApiReady();
+    const script = document.createElement('script');
+    script.src = 'https://www.youtube.com/iframe_api';
+    script.async = true;
+    script.onerror = () => this.enterFallback('api-script');
+    document.head.appendChild(script);
+  }
+
+  /* ---------- entrance track ---------- */
+
+  initEntrance() {
+    if (this.entranceMode !== 'idle') return;
+
+    let audio;
+    try {
+      audio = new Audio();
+      audio.preload = 'auto';
+      audio.src = CONFIG.ENTRANCE.SRC;
+      audio.loop = false;
+      audio.volume = clamp(CONFIG.ENTRANCE.VOLUME / 100, 0, 1);
+      audio.muted = this.muted;
+      audio.addEventListener('ended', () => this.finishEntrance(), { once: true });
+      audio.addEventListener('error', () => this.startEntranceTimer(), { once: true });
+      this.entranceAudio = audio;
+      audio.load();
+    } catch (err) {
+      this.startEntranceTimer();
+      return;
+    }
+
+    this.entranceTimer = window.setInterval(() => this.checkEntrance(), 100);
+
+    // Browsers usually block sound before a gesture. Try anyway; the loader
+    // shows a "press to begin" prompt if the attempt is rejected.
+    const attempt = audio.play();
+    if (attempt && typeof attempt.then === 'function') {
+      attempt.then(() => {
+        if (this.entranceMode !== 'done') {
+          this.entranceMode = 'audio';
+          this.entranceBlocked = false;
+          this.onEntranceBlocked(false);
+        }
+      }).catch(() => this.blockEntrance());
+    } else if (audio.paused) {
+      this.blockEntrance();
+    } else {
+      this.entranceMode = 'audio';
+    }
+  }
+
+  /** Called by the loader's gesture when autoplay was blocked. */
+  startEntrance() {
+    if (this.entranceDone) return;
+    if (this.entranceMode === 'timer') {
+      if (!this.entranceTimerStart) this.entranceTimerStart = performance.now();
+      this.entranceBlocked = false;
+      this.onEntranceBlocked(false);
+      return;
+    }
+    if (!this.entranceAudio) {
+      this.startEntranceTimer();
+      return;
+    }
+    this.entranceBlocked = false;
+    this.onEntranceBlocked(false);
+    const attempt = this.entranceAudio.play();
+    if (attempt && typeof attempt.then === 'function') {
+      attempt.then(() => {
+        this.entranceMode = 'audio';
+      }).catch(() => this.blockEntrance());
+    }
+  }
+
+  blockEntrance() {
+    if (this.entranceDone) return;
+    // A missing/unsupported file has already fallen back to the silent 37s
+    // clock. Never ask for a gesture that would deadlock that timer.
+    if (this.entranceMode === 'timer') return;
+    // Some browsers reject play() before the media `error` event fires.
+    if (!this.entranceAudio || this.entranceAudio.error) {
+      this.startEntranceTimer();
+      return;
+    }
+    this.entranceBlocked = true;
+    this.entranceMode = 'idle';
+    this.onEntranceBlocked(true);
+  }
+
+  /** Silent fallback when the MP3 is missing: still honour the 37s wait. */
+  startEntranceTimer() {
+    if (this.entranceDone) return;
+    if (this.entranceMode === 'timer' && this.entranceTimerStart) return;
+    this.entranceMode = 'timer';
+    this.entranceTimerStart = performance.now();
+    this.entranceBlocked = false;
+    this.onEntranceBlocked(false);
+    if (!this.entranceTimer) {
+      this.entranceTimer = window.setInterval(() => this.checkEntrance(), 100);
+    }
+  }
+
+  checkEntrance() {
+    if (this.entranceDone) return;
+
+    if (this.entranceMode === 'timer') {
+      if (!this.entranceTimerStart) return;
+      const pct = ((performance.now() - this.entranceTimerStart) / (CONFIG.ENTRANCE.DURATION * 1000)) * 100;
+      this.reportEntrance(pct);
+      if (pct >= 100) this.finishEntrance();
+      return;
+    }
+
+    const audio = this.entranceAudio;
+    if (!audio || this.entranceMode !== 'audio') return;
+    const duration = CONFIG.ENTRANCE.DURATION;
+    const pct = (audio.currentTime / duration) * 100;
+    this.reportEntrance(pct);
+    if (audio.currentTime >= duration || audio.ended) this.finishEntrance();
+  }
+
+  reportEntrance(pct) {
+    this.onEntranceProgress(clamp(pct, 0, 100));
+  }
+
+  finishEntrance() {
+    if (this.entranceDone) return;
+    this.entranceDone = true;
+    this.entranceMode = 'done';
+    if (this.entranceTimer) {
+      clearInterval(this.entranceTimer);
+      this.entranceTimer = 0;
+    }
+    if (this.entranceAudio) {
+      try { this.entranceAudio.pause(); } catch (err) { /* ignore */ }
+    }
+    this.onEntranceProgress(100);
+    this.onEntranceComplete();
+  }
+
+  stopEntrance() {
+    if (this.entranceTimer) {
+      clearInterval(this.entranceTimer);
+      this.entranceTimer = 0;
+    }
+    if (this.entranceAudio) {
+      try { this.entranceAudio.pause(); } catch (err) { /* ignore */ }
+    }
+    if (!this.entranceDone) {
+      this.entranceDone = true;
+      this.entranceMode = 'done';
+      this.onEntranceProgress(100);
+    }
+  }
+
+  onApiReady() {
+    if (this.mode !== 'youtube' || this.loadComplete) return;
+    this.yt = window.YT;
+    this.setProgressTarget(20);
+    this.createPlayer();
+  }
+
+  createPlayer() {
+    if (!this.yt || typeof this.yt.Player !== 'function') {
+      this.enterFallback('api-missing');
+      return;
+    }
+    try {
+      this.player = new this.yt.Player('yt-player', {
+        width: 200,
+        height: 200,
+        videoId: CONFIG.MUSIC.VIDEO_ID,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          disablekb: 1,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1,
+          fs: 0,
+          start: CONFIG.MUSIC.START,
+          origin: window.location.origin,
+        },
+        events: {
+          onReady: () => this.onPlayerReady(),
+          onStateChange: (event) => this.onPlayerStateChange(event),
+          onError: (event) => this.onPlayerError(event),
+        },
+      });
+      this.setProgressTarget(50);
+    } catch (err) {
+      this.enterFallback('player-create');
+    }
+  }
+
+  onPlayerReady() {
+    if (this.mode !== 'youtube' || this.loadComplete) return;
+    this.ytReady = true;
+    this.fixIframeFocus();
+    this.setProgressTarget(80);
+    this.bufferStartSegment();
+  }
+
+  /** Muted validation play proves the embed can actually start. */
+  bufferStartSegment() {
+    if (!this.player) {
+      this.enterFallback('no-player');
+      return;
+    }
+    this.buffering = true;
+    try {
+      this.player.mute();
+      this.player.playVideo();
+    } catch (err) {
+      this.enterFallback('buffer-failed');
+    }
+  }
+
+  onPlayerStateChange(event) {
+    if (this.mode !== 'youtube' || !this.player) return;
+    const state = event ? event.data : -1;
+
+    if (this.buffering) {
+      if (state === 1) { // PLAYING: the start segment is buffered
+        this.buffering = false;
+        try {
+          this.player.pauseVideo();
+          this.player.seekTo(CONFIG.MUSIC.START, true);
+        } catch (err) { /* seek is best-effort */ }
+        this.completeLoading();
+      }
+      return;
+    }
+
+    if (state === 1) {
+      this.playing = true;
+    } else if (state === 2) {
+      this.playing = false;
+    } else if (state === 0 && this.started) {
+      // Safety net if the 100ms interval misses the exact loop bound.
+      try {
+        this.player.seekTo(CONFIG.MUSIC.START, true);
+        this.player.playVideo();
+      } catch (err) { /* ignore */ }
+    }
+  }
+
+  onPlayerError(event) {
+    const code = event ? event.data : 0;
+    const documented = YT_ERROR_CODES.indexOf(code) !== -1;
+    this.enterFallback(documented ? 'yt-error-' + code : 'yt-error');
+  }
+
+  completeLoading() {
+    if (this.loadComplete) return;
+    this.loadComplete = true;
+    this.clearLoadTimer();
+    this.setProgressTarget(100);
+    this.onAvailable();
+  }
+
+  setProgressTarget(value) {
+    value = clamp(value, 0, 100);
+    if (value <= this.progress) return;
+    this.progress = value;
+    this.onProgress(value);
+  }
+
+  clearLoadTimer() {
+    if (this.loadTimer) {
+      clearTimeout(this.loadTimer);
+      this.loadTimer = 0;
+    }
+  }
+
+  /* ---------- fallback ---------- */
+
+  enterFallback(reason) {
+    if (this.mode === 'fallback' || this.mode === 'silent') return;
+    this.mode = 'fallback';
+    this.buffering = false;
+    this.clearLoadTimer();
+    this.hidePlayer();
+    this.destroyYouTubePlayer();
+    this.setProgressTarget(100);
+    this.loadFallbackAudio();
+  }
+
+  loadFallbackAudio() {
+    let audio;
+    try {
+      audio = new Audio();
+      audio.preload = 'auto';
+      audio.src = 'assets/music.mp3';
+      audio.loop = false;
+      audio.volume = clamp(this.volume / 100, 0, 1);
+      audio.muted = this.muted;
+      audio.addEventListener('canplay', () => {
+        if (this.mode !== 'fallback') return;
+        this.fallbackReady = true;
+        this.onAvailable();
+        if (this.shouldPlay) this.playFallback();
+      }, { once: true });
+      audio.addEventListener('error', () => this.enterSilent(), { once: true });
+      this.fallbackAudio = audio;
+      audio.load();
+    } catch (err) {
+      this.enterSilent();
+    }
+  }
+
+  enterSilent() {
+    if (this.mode === 'silent') return;
+    this.mode = 'silent';
+    this.fallbackReady = false;
+    this.clearLoop();
+    if (this.fallbackAudio) {
+      try { this.fallbackAudio.pause(); } catch (err) { /* ignore */ }
+      this.fallbackAudio = null;
+    }
+    this.hidePlayer();
+    this.onUnavailable();
+  }
+
+  hidePlayer() {
+    const box = document.getElementById('now-playing');
+    if (box) box.classList.add('is-hidden');
+  }
+
+  destroyYouTubePlayer() {
+    if (!this.player) return;
+    try { this.player.pauseVideo(); } catch (err) { /* ignore */ }
+    try { this.player.destroy(); } catch (err) { /* ignore */ }
+    this.player = null;
+    this.ytReady = false;
+  }
+
+  /* ---------- playback ---------- */
+
+  /** Called synchronously from the loader's first key/click gesture. */
+  start() {
+    if (this.started) return;
+    this.started = true;
+    this.stopEntrance();
+    this.shouldPlay = true;
+    this.bindLifecycle();
+
+    if (this.mode === 'youtube' && this.player) {
+      try {
+        if (this.muted) this.player.mute();
+        else this.player.unMute();
+        this.player.setVolume(this.volume);
+        this.player.seekTo(CONFIG.MUSIC.START, true);
+        this.player.playVideo();
+        this.playing = true;
+      } catch (err) {
+        this.enterFallback('start-failed');
+      }
+    } else if (this.mode === 'fallback') {
+      this.playFallback();
+    }
+
+    this.startLoop();
+  }
+
+  playFallback() {
+    const audio = this.fallbackAudio;
+    if (!audio || !this.fallbackReady || this.mode !== 'fallback') return;
+    try {
+      const { START, END } = CONFIG.MUSIC;
+      if (!Number.isFinite(audio.currentTime) || audio.currentTime < START || audio.currentTime >= END) {
+        audio.currentTime = START;
+      }
+      audio.volume = clamp(this.volume / 100, 0, 1);
+      audio.muted = this.muted;
+      const promise = audio.play();
+      if (promise && promise.catch) promise.catch(() => { /* autoplay blocked */ });
+      this.playing = true;
+    } catch (err) { /* silent */ }
+  }
+
+  pause() {
+    this.shouldPlay = false;
+    this.playing = false;
+    if (this.mode === 'youtube' && this.player) {
+      try { this.player.pauseVideo(); } catch (err) { /* ignore */ }
+    } else if (this.mode === 'fallback' && this.fallbackAudio) {
+      try { this.fallbackAudio.pause(); } catch (err) { /* ignore */ }
+    }
+  }
+
+  resume() {
+    if (!this.started) return;
+    this.shouldPlay = true;
+    if (this.mode === 'youtube' && this.player) {
+      try {
+        this.player.setVolume(this.volume);
+        this.player.playVideo();
+        this.playing = true;
+      } catch (err) { /* ignore */ }
+    } else if (this.mode === 'fallback') {
+      this.playFallback();
+    }
+  }
+
+  setVolume(value) {
+    this.volume = clamp(value, 0, 100);
+    this.clearFade();
+    this.applyVolume();
+  }
+
+  fadeTo(target, duration) {
+    target = clamp(target, 0, 100);
+    if (Math.abs(target - this.volume) < 0.5) {
+      this.setVolume(target);
+      return;
+    }
+    this.clearFade();
+    const from = this.volume;
+    const steps = Math.max(1, Math.round(duration / 25));
+    let step = 0;
+    this.fadeTimer = window.setInterval(() => {
+      step++;
+      const t = step / steps;
+      this.volume = from + (target - from) * t;
+      this.applyVolume();
+      if (step >= steps) {
+        this.volume = target;
+        this.applyVolume();
+        this.clearFade();
+      }
+    }, 25);
+  }
+
+  applyVolume() {
+    if (this.mode === 'youtube' && this.player) {
+      try { this.player.setVolume(this.volume); } catch (err) { /* ignore */ }
+    }
+    if (this.fallbackAudio) {
+      this.fallbackAudio.volume = clamp(this.volume / 100, 0, 1);
+    }
+  }
+
+  clearFade() {
+    if (this.fadeTimer) {
+      clearInterval(this.fadeTimer);
+      this.fadeTimer = 0;
+    }
+  }
+
+  setMuted(muted) {
+    this.muted = !!muted;
+    if (this.player) {
+      try {
+        if (this.muted) this.player.mute();
+        else if (this.started) this.player.unMute();
+      } catch (err) { /* ignore */ }
+    }
+    if (this.fallbackAudio) this.fallbackAudio.muted = this.muted;
+    if (this.entranceAudio) this.entranceAudio.muted = this.muted;
+  }
+
+  toggleMute() {
+    this.setMuted(!this.muted);
+    return this.muted;
+  }
+
+  /* ---------- segment loop ---------- */
+
+  startLoop() {
+    this.clearLoop();
+    this.loopTimer = window.setInterval(() => this.checkLoop(), 100);
+  }
+
+  clearLoop() {
+    if (this.loopTimer) {
+      clearInterval(this.loopTimer);
+      this.loopTimer = 0;
+    }
+  }
+
+  checkLoop() {
+    if (!this.started) return;
+    const { START, END } = CONFIG.MUSIC;
+
+    if (this.mode === 'youtube' && this.player) {
+      try {
+        if (this.player.getCurrentTime() >= END) {
+          this.player.seekTo(START, true);
+        }
+      } catch (err) { /* ignore */ }
+      return;
+    }
+
+    const audio = this.fallbackAudio;
+    if (this.mode === 'fallback' && audio) {
+      if (audio.ended || audio.currentTime >= END) {
+        try {
+          audio.currentTime = START;
+          if (this.shouldPlay) {
+            const promise = audio.play();
+            if (promise && promise.catch) promise.catch(() => { /* ignore */ });
+          }
+        } catch (err) { /* ignore */ }
+      }
+    }
+  }
+
+  /* ---------- tab visibility + cleanup ---------- */
+
+  bindLifecycle() {
+    if (this.lifecycleBound) return;
+    this.lifecycleBound = true;
+    this.onPageHide = () => this.destroy();
+    window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('beforeunload', this.onPageHide);
+  }
+
+  handleVisibility() {
+    if (document.hidden) {
+      this.wasPlayingBeforeHidden = this.shouldPlay;
+      if (this.shouldPlay) this.pause();
+      return;
+    }
+    if (this.wasPlayingBeforeHidden) {
+      this.wasPlayingBeforeHidden = false;
+      if (!this.muted) this.resume();
+    }
+  }
+
+  /** Keep Tab and keyboard focus on the game, never inside the embed. */
+  fixIframeFocus() {
+    try {
+      const iframe = this.player && this.player.getIframe && this.player.getIframe();
+      if (iframe) iframe.setAttribute('tabindex', '-1');
+    } catch (err) { /* ignore */ }
+  }
+
+  destroy() {
+    this.stopEntrance();
+    this.clearLoop();
+    this.clearFade();
+    this.clearLoadTimer();
+    if (this.player) {
+      try { this.player.pauseVideo(); } catch (err) { /* ignore */ }
+    }
+    if (this.fallbackAudio) {
+      try { this.fallbackAudio.pause(); } catch (err) { /* ignore */ }
+    }
+    if (this.lifecycleBound) {
+      window.removeEventListener('pagehide', this.onPageHide);
+      window.removeEventListener('beforeunload', this.onPageHide);
+      this.lifecycleBound = false;
+    }
+  }
+}
+
+/* ==========================================================================
+   9. LOADER SCREEN
+   ========================================================================== */
+
+class LoaderScreen {
+  constructor() {
+    this.el = document.getElementById('loader');
+    this.statusEl = document.getElementById('loader-status');
+    this.pctEl = document.getElementById('loader-pct');
+    this.barEl = document.getElementById('loader-bar');
+    this.segmentsEl = document.getElementById('loader-segments');
+    this.readyEl = document.getElementById('loader-ready');
+    this.warningEl = document.getElementById('loader-warning');
+    this.canvas = document.getElementById('game');
+
+    this.segments = [];
+    this.lit = -1;
+    this.lastPct = '';
+    this.musicProgress = 0;
+    this.entranceProgress = 0;
+    this.target = 0;
+    this.displayed = 0;
+    this.phase = 'idle';
+    this.music = null;
+    this.onReady = () => {};
+    this.onStart = () => {};
+    this.lastFrame = 0;
+    this.raf = 0;
+
+    this.keyHandler = (e) => this.handleKey(e);
+    this.pointerHandler = (e) => this.handlePointer(e);
+
+    for (let i = 0; i < 20; i++) {
+      const segment = document.createElement('span');
+      this.segmentsEl.appendChild(segment);
+      this.segments.push(segment);
+    }
+
+    // Capture phase: the dismissing key never reaches the game controls.
+    window.addEventListener('keydown', this.keyHandler, true);
+    this.el.addEventListener('pointerdown', this.pointerHandler, true);
+  }
+
+  attach({ music, onReady, onStart }) {
+    this.music = music;
+    this.onReady = onReady || this.onReady;
+    this.onStart = onStart || this.onStart;
+  }
+
+  /** Start the loader animation, then kick off music loading. */
+  begin() {
+    if (this.phase !== 'idle') return;
+    this.phase = 'loading';
+    this.lastFrame = 0;
+    this.raf = requestAnimationFrame((now) => this.tick(now));
+    if (this.music) this.music.init();
+  }
+
+  /** Fed by MusicManager — always a monotonic target, never a fake timer. */
+  setProgress(progress) {
+    progress = clamp(progress, 0, 100);
+    if (progress > this.musicProgress) this.musicProgress = progress;
+  }
+
+  /** Entrance-track progress (0–100 over the 37-second piece). */
+  setEntranceProgress(progress) {
+    progress = clamp(progress, 0, 100);
+    if (progress > this.entranceProgress) this.entranceProgress = progress;
+  }
+
+  /** Autoplay was blocked: ask for the gesture that unlocks the entrance. */
+  setEntranceBlocked(blocked) {
+    if (this.phase === 'ready' || this.phase === 'launching' || this.phase === 'done') return;
+    if (blocked) {
+      this.phase = 'blocked';
+      this.readyEl.textContent = 'PRESS ANY KEY OR CLICK TO BEGIN';
+      this.readyEl.classList.remove('hidden');
+    } else if (this.phase === 'blocked') {
+      this.phase = 'loading';
+      this.readyEl.classList.add('hidden');
+      // The animation loop stops while blocked; restart it after the gesture.
+      this.lastFrame = 0;
+      this.raf = requestAnimationFrame((t) => this.tick(t));
+    }
+  }
+
+  setWarning(text) {
+    if (!text) return;
+    this.warningEl.textContent = text;
+    this.warningEl.classList.remove('hidden');
+  }
+
+  tick(now) {
+    if (this.phase !== 'loading') return;
+    if (!this.lastFrame) this.lastFrame = now;
+    const dt = Math.min(0.1, Math.max(0, (now - this.lastFrame) / 1000));
+    this.lastFrame = now;
+
+    // Both signals must reach 100: the YouTube milestones and the 37s entrance.
+    const target = Math.min(this.musicProgress, this.entranceProgress);
+    this.target = target;
+
+    // Ease toward the real target and never move backwards.
+    const k = 1 - Math.exp(-8 * dt);
+    if (this.displayed < target) {
+      this.displayed += (target - this.displayed) * k;
+    }
+    if (target - this.displayed < 0.25) this.displayed = target;
+    this.displayed = clamp(this.displayed, 0, 100);
+    this.renderValue();
+
+    if (target >= 100 && this.displayed >= 99.75) {
+      this.displayed = 100;
+      this.renderValue();
+      this.markReady();
+      return;
+    }
+
+    this.raf = requestAnimationFrame((t) => this.tick(t));
+  }
+
+  renderValue() {
+    const pct = Math.round(this.displayed);
+    const label = String(pct).padStart(3, '0') + '%';
+    if (label !== this.lastPct) {
+      this.lastPct = label;
+      this.pctEl.textContent = label;
+      this.barEl.setAttribute('aria-valuenow', String(pct));
+    }
+
+    const lit = Math.round((this.displayed / 100) * this.segments.length);
+    if (lit !== this.lit) {
+      this.lit = lit;
+      for (let i = 0; i < this.segments.length; i++) {
+        this.segments[i].classList.toggle('is-on', i < lit);
+      }
+    }
+  }
+
+  markReady() {
+    if (this.phase !== 'loading') return;
+    this.phase = 'ready';
+    this.el.classList.add('is-ready');
+    this.statusEl.textContent = 'LOADING COMPLETE';
+    this.readyEl.textContent = 'PRESS ANY KEY OR CLICK TO START';
+    this.readyEl.classList.remove('hidden');
+    this.onReady();
+  }
+
+  handleKey(e) {
+    if (this.phase === 'blocked') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      if (this.music) this.music.startEntrance();
+      return;
+    }
+    if (this.phase !== 'ready') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.repeat) return;
+    this.launch();
+  }
+
+  handlePointer(e) {
+    if (this.phase === 'blocked') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.music) this.music.startEntrance();
+      return;
+    }
+    if (this.phase !== 'ready') return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.launch();
+  }
+
+  /** First key/click: start audio inside the gesture, then reveal the title. */
+  launch() {
+    if (this.phase !== 'ready') return;
+    this.phase = 'launching';
+
+    if (this.music) this.music.start();
+    this.onStart(performance.now() + 150);
+
+    this.el.classList.add('is-done');
+    this.el.setAttribute('aria-hidden', 'true');
+    window.removeEventListener('keydown', this.keyHandler, true);
+    this.el.removeEventListener('pointerdown', this.pointerHandler, true);
+
+    try { window.focus(); } catch (err) { /* ignore */ }
+    try { this.canvas.focus({ preventScroll: true }); }
+    catch (err) { try { this.canvas.focus(); } catch (err2) { /* ignore */ } }
+  }
+}
+
+/* ==========================================================================
+   10. INPUT MAP + BOOT
    ========================================================================== */
 
 const KEY_ACTIONS = {
@@ -1875,5 +2801,29 @@ function resolveAction(e) {
   return KEY_ACTIONS[e.code] || KEY_FALLBACK[(e.key || '').toLowerCase()] || null;
 }
 
+// Boot order: build the game in its LOADING state (loop idle), wire up the
+// music manager + loader, then let the loader drive the transition to TITLE.
+const game = new Game();
+const loader = new LoaderScreen();
+const music = new MusicManager({
+  muted: game.audio.muted,
+  onProgress: (progress) => loader.setProgress(progress),
+  onWarning: (text) => loader.setWarning(text),
+  onAvailable: () => game.setMusicUnavailable(false),
+  onUnavailable: () => game.setMusicUnavailable(true),
+  onEntranceProgress: (progress) => loader.setEntranceProgress(progress),
+  onEntranceBlocked: (blocked) => loader.setEntranceBlocked(blocked),
+  onEntranceComplete: () => {},
+});
+
+game.music = music;
+loader.attach({
+  music,
+  onReady: () => game.setState('ready'),
+  onStart: (guardUntil) => game.begin(guardUntil),
+});
+
 // Exposed for quick tweaking in the browser console.
-window.starLancer = new Game();
+window.starLancer = game;
+
+loader.begin();

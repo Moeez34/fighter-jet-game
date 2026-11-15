@@ -9,8 +9,8 @@
 </head>
 <body>
 
-<main class="stage" id="stage" data-state="title" aria-label="Star Lancer arcade game">
-  <canvas id="game" width="480" height="720"></canvas>
+<main class="stage" id="stage" data-state="loading" aria-label="Star Lancer arcade game">
+  <canvas id="game" width="480" height="720" tabindex="0" aria-label="Star Lancer playfield"></canvas>
 
   <!-- In-game HUD -->
   <div class="hud" id="hud">
@@ -25,6 +25,7 @@
     <div class="hud__cell hud__cell--right">
       <span class="hud__label">LEVEL</span>
       <span class="hud__value" id="level">01</span>
+      <span class="hud__music" id="music-state">MUSIC: ON</span>
     </div>
   </div>
 
@@ -47,6 +48,7 @@
       <p class="tagline">INTERCEPTOR VS. SWARM</p>
       <div class="hi-badge">HIGH SCORE <strong id="title-high">000000</strong></div>
       <p class="prompt blink">PRESS ENTER TO START</p>
+      <p class="music-note hidden" id="music-note">MUSIC UNAVAILABLE</p>
       <p class="credit">(C) 1985 STAR LANCER / 1 CREDIT</p>
       <div class="controls">
         <p class="keyboard-only"><span>MOVE</span> ARROWS / WASD</p>
@@ -72,6 +74,30 @@
   </div>
 
   <div class="banner" id="banner" aria-live="polite"></div>
+
+  <!-- Background music player. Kept visible (never display:none / opacity:0)
+       while active, as required for an official YouTube embed. -->
+  <div class="now-playing" id="now-playing" aria-hidden="true">
+    <span class="now-playing__label">NOW PLAYING</span>
+    <div class="now-playing__screen">
+      <div id="yt-player"></div>
+    </div>
+  </div>
+
+  <!-- Boot loader -->
+  <div class="loader" id="loader" aria-live="polite" aria-label="Loading audio">
+    <div class="loader__inner">
+      <p class="eyebrow loader__eyebrow">SECTOR 7 // DEEP SPACE</p>
+      <p class="loader__status" id="loader-status">LOADING AUDIO...</p>
+      <div class="loader__bar" id="loader-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="loader__segments" id="loader-segments"></div>
+      </div>
+      <p class="loader__pct" id="loader-pct">000%</p>
+      <p class="loader__ready blink hidden" id="loader-ready">PRESS ANY KEY OR CLICK TO START</p>
+      <p class="loader__warning hidden" id="loader-warning">RUN VIA LOCAL SERVER FOR MUSIC (see README)</p>
+    </div>
+  </div>
+
   <div class="crt" aria-hidden="true"></div>
 </main>
 
