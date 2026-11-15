@@ -124,7 +124,7 @@ const CONFIG = {
   colors: {
     beam: '#5ff8ff',
     beamCore: '#ffffff',
-    playerGlow: '#49a6ff',
+    playerGlow: '#ffc857',
     warm: '#ffd166',
     white: '#ffffff',
   },
@@ -168,24 +168,35 @@ function swapRemove(arr, i) {
    ========================================================================== */
 
 const PIXEL_MAPS = {
-  // Player fighter points up. o = outline, b = body, d = wing shade, c = cockpit
+  // Player fighter points up (X-wing inspired). o=outline, w=hull, g=gray shade,
+  // b=yellow accent, c=cockpit, r=red stripe.
   player: {
     scale: 3,
-    palette: { o: '#082846', b: '#49a6ff', d: '#1b62c4', c: '#eaffff' },
+    palette: {
+      o: '#1a2233',
+      w: '#f4f7fb',
+      g: '#9aa8be',
+      b: '#ffc857',
+      c: '#fff4c9',
+      r: '#ff4d5a',
+    },
     rows: [
-      '.......o.......',
-      '......oco......',
-      '......oco......',
-      '.....obcbo.....',
-      '.....obcbo.....',
-      '....obbcbbo....',
-      '....obbcbbo....',
-      '...obbbbbbbo...',
-      '..obbbbbbbbbo..',
-      '.obbbbbdbbbbbo.',
-      'obbbbbooobbbbbo',
-      'obbo.......obbo',
-      'obo.........obo',
+      '........o........',
+      '.......owo.......',
+      '.......oco.......',
+      '......owcwo......',
+      '......owcwo......',
+      '...o..owwwo..o...',
+      '..owo.owgwo.owo..',
+      '.owwo.owgwo.owwo.',
+      'obwwoowwwwwoowwbo',
+      'obwwoowwwwwoowwbo',
+      '.owroowwwwwoorwo.',
+      '..owwoowgwooowwo.',
+      '..ogwooowooowgo..',
+      '..oowo..o..owoo..',
+      '.oboo...o...oobo.',
+      '.oo.....o.....oo.',
     ],
   },
 
@@ -1034,7 +1045,7 @@ class Game {
 
     this.sprites = buildSpriteCache();
     this.glows = {
-      blue: buildGlow('rgba(73, 166, 255, 0.55)', 96),
+      blue: buildGlow('rgba(255, 200, 87, 0.55)', 96),
       mint: buildGlow('rgba(87, 255, 194, 0.55)', 96),
     };
     this.audio = new AudioEngine();
