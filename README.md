@@ -12,7 +12,7 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000>.
 
-On load, the game shows a retro audio-loader. Progress follows the bundled 37-second entrance track, so the bar fills in real time and the game is flagged ready only once the track ends. Press any key or click once to reveal the title screen; press Enter (or tap) again to start the run.
+On load, the game shows a retro boot loader. Progress follows the bundled 37-second entrance track, so the bar fills in real time and the game is flagged ready only once the track ends. Press any key or click once to reveal the title screen; press Enter (or tap) again to start the run.
 
 ## Controls
 
